@@ -1,7 +1,6 @@
 import numpy as np
 
 
-
 # Mercator latitudes
 def mercator_latitude(lat):
     return np.log(np.tan(np.pi / 4 + lat / 2))
@@ -22,14 +21,25 @@ def mercator_conversion(lat1, lon1, lat2, lon2):
     return delta_phi, delta_lambda
 
 
-def rumbline_distance(lat1, lon1, lat2, lon2):
+def rumbline_distance(start_point, end_point):
+    """
+    Calculates rumbline distance between 2 points located on the earth surface
+
+    :param start_point: lat, lon of starting position
+    :param end_point: lat, lon of ending position
+    :return: distance in NM
+    """
+    lat1, lon1 = start_point
+    lat2, lon2 = end_point
     delta_phi, delta_lambda = mercator_conversion(lat1, lon1, lat2, lon2)
 
     # Calculate distance using the Mercator Sailing formula
     return np.sqrt((delta_lambda * np.cos(np.radians(lat1))) ** 2 + delta_phi ** 2) * 3440.065
 
 
-def bearing_to_waypoint(lat1, lon1, lat2, lon2):
+def bearing_to_waypoint(start_point, end_point):
+    lat1, lon1 = start_point
+    lat2, lon2 = end_point
     delta_phi, delta_lambda = mercator_conversion(lat1, lon1, lat2, lon2)
 
     # Calculate the bearing using atan2
@@ -90,7 +100,6 @@ def mercator_sailing_future_position(lat, lon, speed, bearing, time_interval):
     new_lon = np.degrees(new_lon)
 
     return np.array([new_lat, new_lon])
-
 
 
 if __name__ == '__main__':
