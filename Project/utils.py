@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import GroupKFold, GroupShuffleSplit
 
-from navi import bearing_to_waypoint, rumbline_distance
+from navi import plane_sailing_course_speed, plane_sailing_next_position
 
 
 def geo_to_cartesian(df):
@@ -19,16 +20,14 @@ def geo_to_cartesian(df):
     lon_rad = np.radians(df['lon'])
 
     # Compute x, y, z using spherical to Cartesian transformation
-    df['x'] = np.cos(lat_rad) * np.cos(lon_rad)
-    df['y'] = np.cos(lat_rad) * np.sin(lon_rad)
-    df['z'] = np.sin(lat_rad)
-
-    # df = df.drop(columns=['lat', 'lon'])
+    df = df.assign(x=np.cos(lat_rad) * np.cos(lon_rad))
+    df = df.assign(y=np.cos(lat_rad) * np.sin(lon_rad))
+    df = df.assign(z=np.sin(lat_rad))
 
     return df
 
 
-def cartesian_to_geo(df):
+def cartesian_to_geo(x, y, z):
     """
     Transforms Cartesian coordinates (x, y, z) back to latitude and longitude.
 
@@ -39,20 +38,20 @@ def cartesian_to_geo(df):
         pandas.DataFrame: DataFrame with added 'lat' and 'lon' columns.
     """
     # Calculate latitude (in radians)
-    df['lat'] = np.degrees(np.arcsin(df['z']))
+    lat = np.round(np.degrees(np.arcsin(z)), 1)
 
     # Calculate longitude (in radians), using arctan2 to handle all quadrants
-    df['lon'] = np.degrees(np.arctan2(df['y'], df['x']))
+    lon = np.round(np.degrees(np.arctan2(y, x)), 1)
 
-    df = df.drop(columns=['x', 'y', 'z'])
-
-    return df
+    return lat, lon
 
 
 def calculate_velocity_direction(df):
     """
     Calculates velocity (kn) and direction (bearing in degrees) between consecutive points.
     """
+    df = df.copy()
+    
     velocity = np.zeros(len(df))
     direction = np.zeros(len(df))
 
@@ -76,29 +75,20 @@ def calculate_velocity_direction(df):
         prev_point = (df.iloc[i - 1]['lat'], df.iloc[i - 1]['lon'])
         curr_point = (df.iloc[i]['lat'], df.iloc[i]['lon'])
 
-        # Calculate distance in nautical miles
-        distance = rumbline_distance(prev_point, curr_point)
-
         # Calculate time difference in hours
         time_diff = (df.index[i] - df.index[i - 1]).total_seconds() / 3600
 
         # check time difference more than 6 hrs
-        if time_diff > 6:
+        if time_diff > 6 or time_diff == 0:
             velocity[i] = 0
             direction[i] = 0
             continue
 
-            # Calculate velocity in kn
-        if distance == 0 or time_diff == 0:
-            velocity[i] = 0
-        else:
-            velocity[i] = distance / time_diff
+        # Calculate direction and velocity
+        direction[i], velocity[i] = plane_sailing_course_speed(prev_point, curr_point, time_interval=time_diff)
 
-        # Calculate direction (bearing)
-        direction[i] = bearing_to_waypoint(prev_point, curr_point)
-
-    df.loc[:, 'velocity_kn'] = velocity
-    df.loc[:, 'direction_deg'] = direction
+    df['velocity_kn'] = velocity
+    df['direction_deg'] = direction
 
     return df
 
@@ -107,11 +97,8 @@ def convert_direction_to_sin_cosin(df):
     direction_rad = np.deg2rad(df['direction_deg'])
 
     # Create sine and cosine components
-    df['direction_sin'] = np.sin(direction_rad)
-    df['direction_cos'] = np.cos(direction_rad)
-
-    # Drop the original direction column if it's no longer needed
-    # df = df.drop(columns=['direction_deg'])
+    df = df.assign(direction_sin=np.sin(direction_rad))
+    df = df.assign(direction_cos=np.cos(direction_rad))
 
     return df
 
@@ -133,7 +120,36 @@ def get_direction_from_sin_cos(sin_val, cos_val):
     if angle_deg < 0:
         angle_deg += 360
 
-    return angle_deg
+    return int(angle_deg)
+
+
+def generate_training_dataframe(df):
+    def shift_group(df_group):
+        """
+        Shift features to create target variables for the next observation within each group (TD).
+        """
+        df_group['next_x'] = df_group['x'].shift(-1)
+        df_group['next_y'] = df_group['y'].shift(-1)
+        df_group['next_z'] = df_group['z'].shift(-1)
+        df_group['next_max_wind_kn'] = df_group['max_wind_kn'].shift(-1)
+        df_group['next_min_pressure_mBar'] = df_group['min_pressure_mBar'].shift(-1)
+        df_group['next_velocity_kn'] = df_group['velocity_kn'].shift(-1)
+        df_group['next_direction_sin'] = df_group['direction_sin'].shift(-1)
+        df_group['next_direction_cos'] = df_group['direction_cos'].shift(-1)
+        return df_group
+
+    # Shift features within each group to create targets
+    df = df.groupby('group').apply(shift_group, include_groups=False)
+
+    # Reset index and drop unnecessary columns
+    df = df.reset_index()
+    df.index = pd.to_datetime(df['date'])
+    df = df.drop(columns=['date'])
+
+    # drop NaN containing lines
+    df = df.dropna()
+
+    return df
 
 
 def prepare_dataframe(df):
@@ -147,6 +163,7 @@ def prepare_dataframe(df):
     5. Calculates velocity and direction based on latitude and longitude.
     6. Converts directional degrees into sine and cosine components for better model representation.
     7. Converts geographical coordinates (latitude, longitude) into 3D Cartesian coordinates (x, y, z).
+    8. Generates training data by lagging one observation.
 
     Parameters:
     ----------
@@ -208,20 +225,92 @@ def prepare_dataframe(df):
             return -1
         return enso_df.loc[enso_df['year'] == year].enso.values[0]
 
-    # transform index column to datetime
-    df.index = pd.to_datetime(df.index)
+    def shift_velocity_direction(df_group):
+        """
+        Shifts velocity and direction within each TD group (id), ensuring that the last observation has 0 velocity and 0 direction.
+        """
+        # Shift velocity and direction for each group
+        df_group['velocity_kn'] = df_group['velocity_kn'].shift(-1)
+        df_group['direction_deg'] = df_group['direction_deg'].shift(-1)
 
-    # read enso data and add the feature to df
-    enso_df = pd.read_csv('data/csv_ready/enso_years.csv')
-    df['enso'] = df.apply(import_enso_to_df, axis=1, enso_df=enso_df)
+        # Replace NaN values in the last observation of each group with 0 (because TD dissipates)
+        df_group[['velocity_kn', 'direction_deg']] = df_group[
+            ['velocity_kn', 'direction_deg']].fillna(0)
 
-    # fix the NaN of the TDs name
-    df['name'] = df['name'].apply(lambda x: 'UNNAMED' if pd.isna(x) else x)
+        return df_group
 
-    df = df[['name', 'lat', 'lon', 'max_wind_kn', 'min_pressure_mBar', 'enso']]
+    # Check if dataframe already has been transformed:
+    if not all(col in df.columns for col in ['id', 'velocity_kn', 'direction_deg', 'enso']):
+        # transform index column to datetime
+        df.index = pd.to_datetime(df.index)
 
-    df = calculate_velocity_direction(df)
+        # read enso data and add the feature to df
+        enso_df = pd.read_csv('data/csv_ready/enso_years.csv')
+        df.loc[:, 'enso'] = df.apply(import_enso_to_df, axis=1, enso_df=enso_df)
+
+        # fix the NaN of the TDs name
+        df.loc[:, 'name'] = df['name'].apply(lambda x: 'UNNAMED' if pd.isna(x) else x)
+
+        df = df[['name', 'lat', 'lon', 'max_wind_kn', 'min_pressure_mBar', 'enso']]
+
+        df = calculate_velocity_direction(df)
+
+        # adding consecutive count of the TDs in order to be able to group and split the datasets
+        new_td_starts = (df['velocity_kn'] == 0) & (df['direction_deg'] == 0)
+        ids = new_td_starts.cumsum()
+        df['group'] = ids
+
+        df = df.groupby('group').apply(shift_velocity_direction)
+
+        # Drop the 'group' column temporarily to avoid conflict when resetting the index
+        df = df.drop(columns=['group'])
+
+        # Reset index and drop unnecessary columns
+        df = df.reset_index()
+        df.index = pd.to_datetime(df['date'])
+        df = df.drop(columns=['date'])
+
+        # Add back the 'group' column after resetting the index
+        df['group'] = ids
+
     df = convert_direction_to_sin_cosin(df)
     df = geo_to_cartesian(df)
 
     return df
+
+
+def split_dataframe(df, splitter='gss', n_splits=1, test_size=0.2, random_state=97):
+    # Define the features and target columns
+    X = df[['x', 'y', 'z', 'max_wind_kn', 'min_pressure_mBar', 'velocity_kn',
+            'direction_sin', 'direction_cos', 'enso']]
+    y = df[['next_x', 'next_y', 'next_z', 'next_max_wind_kn', 'next_min_pressure_mBar',
+            'next_velocity_kn', 'next_direction_sin', 'next_direction_cos']]
+
+    # Use the specified splitter
+    if splitter == 'gkf':
+        splitter = GroupKFold(n_splits=n_splits)
+    elif splitter == 'gss':
+        splitter = GroupShuffleSplit(n_splits=n_splits, test_size=test_size, random_state=random_state)
+    else:
+        raise ValueError("Invalid splitter type. Use 'gkf' for GroupKFold or 'gss' for GroupShuffleSplit.")
+
+    groups = df['group']
+
+    # Perform the split and yield train/test sets
+    for train_idx, test_idx in splitter.split(X, y, groups):
+        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+        yield X_train, X_test, y_train, y_test
+
+
+def manage_prediction(df, model):
+    predicted_values = model.predict(df)
+    x, y, z, max_wind_kn, min_pressure_mBar, velocity_kn, direction_sin, direction_cos = predicted_values[0]
+
+    lat, lon = cartesian_to_geo(x, y, z)
+    min_pressure_mBar = int(min_pressure_mBar)
+    max_wind_kn = np.round(max_wind_kn, 1)
+    velocity_kn = np.round(velocity_kn, 1)
+    direction_deg = get_direction_from_sin_cos(direction_sin, direction_cos)
+
+    return lat, lon, max_wind_kn, min_pressure_mBar, velocity_kn, direction_deg
