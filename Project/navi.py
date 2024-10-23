@@ -222,14 +222,31 @@ def plane_sailing_next_position(start_point, course, speed, time_interval=6):
 
     return np.array([new_lat, new_lon])
 
+
+def haversine(start_point, end_point):
+    """
+    Calculate the great-circle distance between two points on the Earth (specified in decimal degrees).
+    """
+    # Convert decimal degrees to radians
+    lat1, lon1 = map(np.radians, start_point)
+    lat2, lon2 = map(np.radians, end_point)
+
+    # Haversine formula
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = np.sin(dlat / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+    c = 2 * np.arcsin(np.sqrt(a))
+    r = 3440.065  # Radius of Earth in nautical miles
+    return c * r
+
 if __name__ == '__main__':
-    lat1 = 11.4
-    lon1 = 130.4
-    lat2 = 12.1
-    lon2 = 129.6
-    # print(rumbline_distance([lat1, lon1], [lat2, lon2]))
+    lat1 = 18.6
+    lon1 = 139.3
+    lat2 = 19
+    lon2 = 140
+    print(rumbline_distance([lat1, lon1], [lat2, lon2]))
     # print(bearing_to_waypoint([lat1, lon1], [lat2, lon2]))
     # print(mercator_sailing_future_position(lat1, lon1, 46.768623, 48.146357, 6))
     # print(great_circle_future_position(lat1, lon1, 46.768623, 48.146357, 6))
     print(plane_sailing_course_speed([lat1, lon1], [lat2, lon2]))
-    print(plane_sailing_next_position([lat1, lon1], 307, 13.4))
+    print(plane_sailing_next_position([lat1, lon1], 274, 14.8))
