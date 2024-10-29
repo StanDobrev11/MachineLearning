@@ -230,7 +230,7 @@ def prepare_dataframe(df):
         - This function assumes that the DataFrame's index is of `datetime` type, allowing access to the year using `row.name.year`.
         """
         year = row.name.year
-        if year == 1949:
+        if year == 1949 or year == 2024:
             return -1
         return enso_df.loc[enso_df['year'] == year].enso.values[0]
 
