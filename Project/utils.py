@@ -601,7 +601,7 @@ def probability_within_radius(df, radius_nm):
         mu, sigma = norm.fit(errors)
         return mu, sigma
 
-    # Step 1: Calculate errors (using the DataFrame generated from your real vs predicted values)
+    # Step 1: Calculate errors (using the DataFrame generated from the real vs predicted values)
     df = calculate_errors(df)
     distance_errors = df['distance_error']
 
@@ -611,6 +611,6 @@ def probability_within_radius(df, radius_nm):
     # Calculate probability for each distance error to be within the specified radius
     df['probability_within_radius'] = norm.cdf(radius_nm - (distance_errors - mu), loc=0, scale=sigma)
 
-    df = df.drop(columns=['lat_error', 'lon_error', 'distance_error'])
+    # df = df.drop(columns=['lat_error', 'lon_error', 'distance_error'])
 
     return df

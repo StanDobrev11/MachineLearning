@@ -1,8 +1,6 @@
-name: myenv
+name: ds_env
 channels:
-  - defaults
   - conda-forge
-  - pytorch
 dependencies:
   - python=3.11
   - jupyterlab
@@ -11,7 +9,6 @@ dependencies:
   - scikit-learn
   - numpy
   - matplotlib
-  - tensorflow
-  - pytorch
-  - torchvision
-  - torchaudio
+  - statsmodels
+  - seaborn
+  - xgboost
