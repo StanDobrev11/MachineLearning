@@ -5,16 +5,15 @@ FROM continuumio/miniconda3
 WORKDIR /app
 
 # Copy the environment file for data science tools
-COPY environment_datascience.yml .
+COPY environment.yml .
 
 # Create the Conda environment
-RUN conda env create -f environment_datascience.yml && \
+RUN conda env create -f environment.yml && \
     conda clean -afy && \
     conda init bash
 
 # Activate the environment
-RUN echo "source activate data_science_env" > ~/.bashrc
-ENV PATH /opt/conda/envs/ds_env/bin:$PATH
+ENV PATH /opt/conda/envs/venv/bin:$PATH
 
 # Expose the Jupyter Lab default port
 EXPOSE 8888

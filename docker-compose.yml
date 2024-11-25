@@ -1,28 +1,11 @@
 version: '3.8'
 
 services:
-  tensorflow_pytorch:
-    build:
-      context: .
-      dockerfile: Dockerfile_nn  # Dockerfile for TensorFlow/PyTorch setup
-    volumes:
-      - .:/app  # Shared volume for both containers
-    container_name: nn_env
-    networks:
-      - shared_network
-
   jupyter_lab:
     build:
       context: .
-      dockerfile: Dockerfile_ds  # Dockerfile for Jupyter Lab setup
+      dockerfile: Dockerfile
     ports:
-      - "8888:8888"  # Expose Jupyter Lab on port 8888
+      - "8888:8888"  # Map Jupyter Lab's default port to the host
     volumes:
-      - .:/app  # Shared volume for both containers
-    container_name: ds_env
-    networks:
-      - shared_network
-
-networks:
-  shared_network:
-    driver: bridge  # Default network type
+      - .:/app  # Mounts the current directory into /app in the container

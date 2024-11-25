@@ -1,4 +1,4 @@
-name: ds_env
+name: venv
 channels:
   - conda-forge
 dependencies:
